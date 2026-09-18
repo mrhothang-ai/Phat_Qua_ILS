@@ -218,7 +218,7 @@
 
     <div class="card">
       <h2>Danh sách nhân viên được nhận quà</h2>
-      <div class="sub">Tải lên file Excel/CSV có các cột: <b>ID, Họ tên, Bộ phận, Ca</b>. Các cột khác sẽ được bỏ qua.</div>
+      <div class="sub">Tải lên file Excel/CSV có các cột: <b>ID, Họ tên, Bộ phận, Ca</b> và <b>CCCD</b> (nếu có). Máy quét được cả mã ID lẫn mã CCCD.</div>
       <div class="drop" id="drop">
         <strong>Chọn file hoặc kéo thả vào đây</strong>
         <span>Excel (.xlsx, .xls) hoặc CSV</span>
@@ -283,7 +283,7 @@
       <h2>Tra cứu &amp; xác nhận thủ công</h2>
       <div class="sub">Dùng khi thẻ hỏng hoặc không quét được. Gõ ID hoặc tên để tìm.</div>
       <div class="field" style="margin-bottom:8px">
-        <input id="manualSearch" type="text" placeholder="Nhập ID hoặc tên nhân viên…" oninput="renderManual()">
+        <input id="manualSearch" type="text" placeholder="Nhập ID / CCCD / tên nhân viên…" oninput="renderManual()">
       </div>
       <div class="manual-list" id="manualList"></div>
     </div>
@@ -10521,14 +10521,15 @@ function handleFile(file){
 
 function parseRows(rows){
   // find header row (contains ID + name + dept + ca)
-  let hIdx=-1, cId=-1,cName=-1,cDept=-1,cCa=-1;
+  let hIdx=-1, cId=-1,cName=-1,cDept=-1,cCa=-1,cCCCD=-1;
   for(let i=0;i<Math.min(rows.length,15);i++){
     const r=rows[i];
     const id=findCol(r,['id','ma nv','manv','ma so','ma nhan vien']);
     const nm=findCol(r,['ho ten','hoten','ho va ten','ten','full name','name']);
     const dp=findCol(r,['bo phan','department','phong ban','dept','part']);
     const ca=findCol(r,['ca','shift','ca lam viec']);
-    if(id>-1 && nm>-1){ hIdx=i; cId=id;cName=nm;cDept=dp;cCa=ca; break; }
+    const cc=findCol(r,['cccd','cmnd','can cuoc','so cccd','can cuoc cong dan','id card','national id']);
+    if(id>-1 && nm>-1){ hIdx=i; cId=id;cName=nm;cDept=dp;cCa=ca;cCCCD=cc; break; }
   }
   if(hIdx<0){ toast('Không tìm thấy cột ID/Họ tên trong file.'); return; }
 
@@ -10546,6 +10547,7 @@ function parseRows(rows){
       id, name: name||'(không tên)',
       dept:(cDept>-1&&r[cDept]!==undefined?String(r[cDept]):'').trim()||'(không rõ)',
       shift:(cCa>-1&&r[cCa]!==undefined?String(r[cCa]):'').trim()||'-',
+      cccd:(cCCCD>-1&&r[cCCCD]!==undefined?String(r[cCCCD]):'').trim(),
       received:false, receivedAt:null
     });
   }
@@ -10697,11 +10699,12 @@ function scanTick(){
 
 /* ================= Core matching ================= */
 function findEmp(rawId){
-  const q=rawId.trim();
-  let e=state.employees.find(x=>x.id===q);
+  const q=rawId.trim(); const qn=q.replace(/\s+/g,'');
+  // 1) khớp theo mã ID nhân viên
+  let e=state.employees.find(x=>x.id===q || x.id.replace(/\s+/g,'')===qn);
   if(e) return e;
-  const qn=q.replace(/\s+/g,'');
-  return state.employees.find(x=>x.id.replace(/\s+/g,'')===qn) || null;
+  // 2) không thấy thì khớp theo CCCD
+  return state.employees.find(x=>x.cccd && (x.cccd===q || x.cccd.replace(/\s+/g,'')===qn)) || null;
 }
 function handleScan(rawId){
   busy=true; scanning=false;
@@ -10760,7 +10763,7 @@ function renderManual(){
   const q=norm(document.getElementById('manualSearch').value);
   const box=document.getElementById('manualList');
   let list=state.employees;
-  if(q) list=list.filter(e=>norm(e.name).includes(q)||e.id.toLowerCase().includes(q)||norm(e.dept).includes(q));
+  if(q) list=list.filter(e=>norm(e.name).includes(q)||e.id.toLowerCase().includes(q)||norm(e.dept).includes(q)||(e.cccd&&e.cccd.includes(q)));
   list=list.slice(0,60);
   if(!list.length){ box.innerHTML='<div class="empty">Không tìm thấy nhân viên phù hợp.</div>'; return; }
   box.innerHTML=list.map(e=>`
@@ -10803,7 +10806,7 @@ function renderDetail(){
   let list=state.employees.slice();
   if(detailFilter==='done') list=list.filter(e=>e.received);
   if(detailFilter==='wait') list=list.filter(e=>!e.received);
-  if(q) list=list.filter(e=>norm(e.name).includes(q)||e.id.toLowerCase().includes(q)||norm(e.dept).includes(q));
+  if(q) list=list.filter(e=>norm(e.name).includes(q)||e.id.toLowerCase().includes(q)||norm(e.dept).includes(q)||(e.cccd&&e.cccd.includes(q)));
   const t=document.getElementById('detailTable');
   t.innerHTML=`<thead><tr><th>#</th><th>ID</th><th>Họ tên</th><th>Bộ phận</th><th>Ca</th><th>Trạng thái</th><th>Thời gian</th></tr></thead>
     <tbody>${list.map((e,i)=>`<tr>
@@ -10824,10 +10827,10 @@ function exportReport(){
   // Sheet 1: Chi tiết
   const head=[['BÁO CÁO PHÁT QUÀ'],[state.campaign],
     ['Xuất lúc:',fmtTime(now)],['Đã phát:',done+' / '+total+' ('+(total?Math.round(done/total*100):0)+'%)'],['Còn lại:',rest],[],
-    ['STT','ID','Họ tên','Bộ phận','Ca','Trạng thái','Thời gian nhận']];
-  const body=state.employees.map((e,i)=>[i+1,e.id,e.name,e.dept,e.shift,e.received?'Đã nhận':'Chưa nhận',e.received?fmtTime(e.receivedAt):'']);
+    ['STT','ID','CCCD','Họ tên','Bộ phận','Ca','Trạng thái','Thời gian nhận']];
+  const body=state.employees.map((e,i)=>[i+1,e.id,e.cccd||'',e.name,e.dept,e.shift,e.received?'Đã nhận':'Chưa nhận',e.received?fmtTime(e.receivedAt):'']);
   const ws1=XLSX.utils.aoa_to_sheet(head.concat(body));
-  ws1['!cols']=[{wch:6},{wch:12},{wch:24},{wch:24},{wch:6},{wch:12},{wch:20}];
+  ws1['!cols']=[{wch:6},{wch:12},{wch:15},{wch:24},{wch:24},{wch:6},{wch:12},{wch:20}];
   XLSX.utils.book_append_sheet(wb,ws1,'Chi tiết');
 
   // Sheet 2: Tổng hợp
