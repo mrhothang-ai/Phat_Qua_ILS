@@ -180,6 +180,9 @@
   .note b{color:var(--ink)}
   .rowbtns{display:flex;gap:10px;margin-top:6px}
   .rowbtns .btn{width:auto;flex:1}
+  .ver{display:inline-block;font-size:11px;font-weight:700;color:#CDD5E0;background:rgba(255,255,255,.12);
+    padding:2px 8px;border-radius:999px;vertical-align:middle;margin-left:7px;letter-spacing:.02em}
+  .verfoot{text-align:center;font-size:11.5px;color:var(--faint);padding:6px 0 20px}
   .hide{display:none!important}
   @media(max-width:480px){
     main{padding:12px}
@@ -193,7 +196,7 @@
 <header>
   <div class="moon"></div>
   <div class="h-title">
-    <h1>Xác nhận phát quà</h1>
+    <h1>Xác nhận phát quà <span class="ver" id="appVer"></span></h1>
     <div class="camp" id="hCamp">Chưa có chiến dịch</div>
   </div>
   <div class="h-badge" id="hBadge">0 / 0</div>
@@ -318,6 +321,8 @@
     </div>
   </section>
 </main>
+
+<div class="verfoot" id="appVerFoot"></div>
 
 <!-- Result overlay -->
 <div class="result" id="result">
@@ -10466,6 +10471,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
 <script>
 /* ================= State & storage ================= */
+const APP_VERSION='v1.2';
+const APP_DATE='18/09/2026';
 const STORE_KEY = 'ilsung_gift_v2';
 let state = { campaign:'', createdAt:null, employees:[] };
 let detailFilter = 'all';
@@ -10864,6 +10871,8 @@ function resetAll(){
 
 /* ================= Init ================= */
 (function init(){
+  document.getElementById('appVer').textContent=APP_VERSION;
+  document.getElementById('appVerFoot').textContent='IL-Sung Tech · Xác nhận phát quà · '+APP_VERSION+' — '+APP_DATE;
   const had=load();
   if(had && state.employees && state.employees.length){
     document.getElementById('campInput').value=state.campaign||'';
