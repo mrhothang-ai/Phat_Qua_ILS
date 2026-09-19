@@ -303,7 +303,7 @@
 
       <div class="card">
         <h2>Nhập / cập nhật danh sách</h2>
-        <div class="sub">File Excel/CSV có cột <b>ID, Họ tên, Bộ phận, Ca</b> và <b>CCCD</b> (nếu có). Danh sách sẽ nạp lên kho chung; những người đã nhận trước đó được giữ nguyên.</div>
+        <div class="sub">File Excel/CSV có cột <b>ID, Họ tên, Bộ phận, Ca</b> và <b>CCCD</b> (nếu có). Nếu file có sẵn cột <b>Trạng thái</b> / <b>Thời gian nhận</b> thì các dòng “Đã nhận” cũng được ghi nhận. Người đã quét trong app trước đó vẫn được giữ.</div>
         <div class="field"><label>Tên chiến dịch</label><input id="campInput" type="text" placeholder="VD: Phát quà Trung Thu 2026"></div>
         <div class="drop" id="drop">
           <strong>Chọn file hoặc kéo thả</strong><span>Excel (.xlsx, .xls) hoặc CSV</span>
@@ -10469,7 +10469,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 
 <script>
 /* ================= Config & state ================= */
-const APP_VERSION='v2.0';
+const APP_VERSION='v2.1';
 const APP_DATE='18/09/2026';
 const LS_API='ilsung_gift_api';
 const LS_DEVICE='ilsung_gift_device';
@@ -10484,7 +10484,14 @@ let pollTimer=null, lastCode='', lastCodeAt=0;
 function stripAccent(s){return (s||'').toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D');}
 function norm(s){return stripAccent(s).toLowerCase().trim().replace(/\s+/g,' ');}
 function pad(n){return n<10?'0'+n:''+n;}
-function fmtTime(ts){if(!ts)return '';const d=new Date(Number(ts)||ts);return pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+d.getFullYear()+' '+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());}
+function fmtTime(ts){ if(ts===null||ts===undefined||ts==='')return '';
+  if(typeof ts==='string' && /[\/:]/.test(ts) && isNaN(Number(ts))) return ts.trim();
+  const d=new Date(Number(ts)||ts); if(isNaN(d.getTime())) return String(ts);
+  return pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+d.getFullYear()+' '+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds());}
+function parseVNDate(s){ s=String(s||'').trim(); if(!s)return '';
+  const m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if(m){ const d=new Date(+m[3],+m[2]-1,+m[1],+(m[4]||0),+(m[5]||0),+(m[6]||0)); if(!isNaN(d))return d.getTime(); }
+  const t=Date.parse(s); return isNaN(t)? s : t; }
 function fmtStamp(ts){const d=new Date(ts);return d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes());}
 function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2400);}
@@ -10795,26 +10802,32 @@ function handleFile(file){
   reader.readAsArrayBuffer(file);
 }
 async function parseAndUpload(rows){
-  let hIdx=-1,cId,cName,cDept,cCa,cCCCD;
+  let hIdx=-1,cId,cName,cDept,cCa,cCCCD,cStat,cTime,cDev;
   for(let i=0;i<Math.min(rows.length,15);i++){const r=rows[i];
     const id=findCol(r,['id','ma nv','manv','ma so','ma nhan vien']),nm=findCol(r,['ho ten','hoten','ho va ten','ten','full name','name']),
       dp=findCol(r,['bo phan','department','phong ban','dept','part']),ca=findCol(r,['ca','shift','ca lam viec']),
-      cc=findCol(r,['cccd','cmnd','can cuoc','so cccd','can cuoc cong dan','id card','national id']);
-    if(id>-1&&nm>-1){hIdx=i;cId=id;cName=nm;cDept=dp;cCa=ca;cCCCD=cc;break;}}
+      cc=findCol(r,['cccd','cmnd','can cuoc','so cccd','can cuoc cong dan','id card','national id']),
+      stt=findCol(r,['trang thai','tinh trang','status','da nhan','da phat']),
+      tm=findCol(r,['thoi gian nhan','thoi gian','ngay nhan','received time']),
+      dv=findCol(r,['may phat','thiet bi','device']);
+    if(id>-1&&nm>-1){hIdx=i;cId=id;cName=nm;cDept=dp;cCa=ca;cCCCD=cc;cStat=stt;cTime=tm;cDev=dv;break;}}
   if(hIdx<0){ toast('Không tìm thấy cột ID/Họ tên.'); return; }
-  const list=[],seen={};
+  const cell=(r,c)=>(c>-1&&r[c]!==undefined?String(r[c]):'').trim();
+  const isRec=s=>/da nhan|da phat|roi|^x$|^co$|yes|true|^1$|done/.test(norm(s));
+  const list=[],seen={}; let recCount=0;
   for(let i=hIdx+1;i<rows.length;i++){const r=rows[i];
-    let id=(r[cId]!==undefined?String(r[cId]):'').trim(),name=(cName>-1&&r[cName]!==undefined?String(r[cName]):'').trim();
+    let id=cell(r,cId),name=cell(r,cName);
     if(!id)continue; if(/^\d{1,3}$/.test(id)&&(/^\d{1,3}$/.test(name)||name===''))continue; if(norm(id)==='id')continue; if(seen[id])continue; seen[id]=true;
-    list.push({id,name:name||'(không tên)',dept:(cDept>-1&&r[cDept]!==undefined?String(r[cDept]):'').trim()||'(không rõ)',
-      shift:(cCa>-1&&r[cCa]!==undefined?String(r[cCa]):'').trim()||'-',cccd:(cCCCD>-1&&r[cCCCD]!==undefined?String(r[cCCCD]):'').trim()});}
+    const rec=cStat>-1?isRec(r[cStat]):false; if(rec)recCount++;
+    list.push({id,name:name||'(không tên)',dept:cell(r,cDept)||'(không rõ)',shift:cell(r,cCa)||'-',cccd:cell(r,cCCCD),
+      received:rec, receivedAt: rec?parseVNDate(cell(r,cTime)):'', device: rec?cell(r,cDev):''});}
   if(!list.length){ toast('File không có dòng hợp lệ.'); return; }
   const camp=document.getElementById('campInput').value.trim()||campaign||'Chiến dịch phát quà';
-  toast('Đang tải '+list.length+' người lên hệ thống…');
+  toast('Đang tải '+list.length+' người'+(recCount?(' ('+recCount+' đã nhận)'):'')+' lên hệ thống…');
   try{
     const d=await apiPost({action:'import',password:adminPwMem,campaign:camp,rows:list});
     if(d&&d.ok){
-      document.getElementById('importPills').innerHTML=`<span class="pill">Đã nạp: <b>${d.count}</b></span>`+(d.carried?`<span class="pill" style="background:var(--ok-soft);border-color:#BEE6C9"><b>${d.carried}</b> giữ trạng thái đã nhận</span>`:'');
+      document.getElementById('importPills').innerHTML=`<span class="pill">Đã nạp: <b>${d.count}</b></span>`+((d.received)?`<span class="pill" style="background:var(--ok-soft);border-color:#BEE6C9"><b>${d.received}</b> đã nhận</span>`:'');
       toast('Nạp danh sách thành công.'); sync();
     } else if(d&&d.error==='wrong-password'){ toast('Sai mật khẩu Admin. Đăng nhập lại.'); adminLogout(); }
     else toast('Lỗi nạp danh sách.');
